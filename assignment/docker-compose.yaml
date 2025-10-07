@@ -1,0 +1,97 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: redis_server
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+  
+  worker:
+    build: 
+      context: .
+      dockerfile: build/worker.Dockerfile
+    depends_on:
+      - redis
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - STABILITY_KEY=${STABILITY_KEY}
+      - IMAGE_STORAGE_DIR=/app/images
+      - STABILITY_URL=${STABILITY_URL}
+      - STABILITY_KEY=${STABILITY_KEY}  # dummy key for testing
+      - STABLE_DIFFUSION_URL=${STABLE_DIFFUSION_URL:-http://stablediffusion:7860}
+    command: python worker.py
+    volumes:
+      - images_volume:/app/images
+
+  backend:
+    build:
+      context: .
+      dockerfile: build/backend.Dockerfile
+    container_name: backend_app
+    image: fastapi-backend:latest
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - STABILITY_KEY=${STABILITY_KEY}
+      - IMAGE_STORAGE_DIR=/app/images
+      - STABILITY_URL=${STABILITY_URL}
+      - STABILITY_KEY=${STABILITY_KEY}  # dummy key for testing
+      - STABLE_DIFFUSION_URL=${STABLE_DIFFUSION_URL:-http://stablediffusion:7860}
+    depends_on:
+      - redis
+    # command: ["tail", "-f", "/dev/null"]
+    command: sh -c "uvicorn app:app --host 0.0.0.0 --port 8000 --reload"
+    volumes:
+      - images_volume:/app/images
+
+  frontend:
+    build:
+      context: .
+      dockerfile: build/frontend.Dockerfile
+    image: streamlit-frontend:latest
+    container_name: frontend_app
+    ports:
+      - "8501:8000"
+    environment:
+      - FASTAPI_URL=${FASTAPI_URL:-http://backend:8000}
+    depends_on:
+      - backend
+    command: sh -c "streamlit run streamlit.py --server.port 8000 --server.address 0.0.0.0"
+
+  download:
+    build: .stable-diffusion/services/download/
+    profiles: ["download"]
+    stop_signal: SIGKILL
+    volumes:
+      - ./data:/data
+
+  stablediffusion:
+    ports:
+      - "${WEBUI_PORT:-7860}:7860"
+    volumes:
+      - ./data:/data
+      - ./output:/output
+    stop_signal: SIGKILL
+    profiles: ["stablediffusion"]
+    tty: true
+    build: ./services/AUTOMATIC1111
+    image: sd-auto:78
+    environment:
+      - CLI_ARGS=--no-half --precision full --allow-code --enable-insecure-extension-access --api
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #           - driver: nvidia
+    #             device_ids: ['0']
+    #             capabilities: [compute, utility]
+
+volumes:
+  redis_data:
+  images_volume:
