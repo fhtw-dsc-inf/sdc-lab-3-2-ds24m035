@@ -5,8 +5,8 @@ app = FastAPI()
 
 
 @app.get("/")
-def root():
-    return {"hello data scientists!!"}
+def root(name: str = 'name'):
+    return {"hello data scientists!!: "+ name}
 
 
 if __name__ == "__main__":
